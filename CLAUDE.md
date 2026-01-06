@@ -39,17 +39,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Workflow - 단어 추가 시
 
-단어를 추가할 때 **3개 파일** 업데이트 필요:
+### 사용자가 할 일
+새 단어 목록만 제공하면 됨. 예: "다음 단어 추가해줘: nuance, leverage, mitigate"
 
-1. **words.json**: `"단어": "한국어 뜻"`
-2. **examples.json**: `"단어": "예문에서 **단어**가 볼드 처리됨"`
-3. **phonetics.json**: `"단어": "/IPA 발음기호/"` (구/숙어는 빈 문자열 `""`)
+### Claude가 할 일
+1. **words.json**: 한국어 뜻 추가
+   - 예: `"leverage": "영향력, 지렛대; 활용하다"`
+2. **examples.json**: 자연스러운 예문 작성 (단어를 `**볼드**`로 표시)
+   - 예: `"leverage": "We need to **leverage** our existing resources to maximize efficiency."`
+3. **phonetics.json**: IPA 발음기호 추가
+   - 예: `"leverage": "/ˈlevərɪdʒ/"`
+   - 구/숙어는 빈 문자열 `""`
+4. **Deploy**: 변경사항 커밋 후 main 브랜치에 push
 
+### 명령어
 ```bash
 cd /home/jumoon/99_usefull/11_English/vocab-quiz-web/frontend/dist
-git add . && git commit -m "Add new words" && git push origin main
+git add . && git commit -m "Add new words: word1, word2, ..." && git push origin main
 ```
+
+### 파일 위치
+- Master file: `/home/jumoon/99_usefull/11_English/words.json`
+- Symlink: `data/words.json` → Master file
+- Examples: `data/examples.json`
+- Phonetics: `data/phonetics.json`
 
 ### 참고
 - YouGlish 링크는 앱에서 자동 생성됨 (`https://youglish.com/pronounce/{word}/english`)
 - 구/숙어(여러 단어)는 phonetics에 빈 문자열 사용
+- TTS는 Web Speech API 사용 (브라우저 내장)
