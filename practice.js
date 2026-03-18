@@ -221,13 +221,15 @@ The student was given the vocabulary word "${word}" (meaning: "${meaning}") and 
 
 The student said: "${spokenText}"
 
-Please evaluate in Korean (한국어로 답변):
-1. **문법**: 문법적으로 올바른지 (오류가 있으면 구체적으로 지적하고 수정 예시 제공)
-2. **단어 사용**: "${word}"의 사용이 적절하고 자연스러운지
-3. **자연스러움**: 원어민이 들었을 때 자연스러운 문장인지
-4. **수정 제안**: 더 자연스러운 문장으로 개선할 수 있다면 제안
+IMPORTANT: This is spoken language transcribed by STT. The student may have self-corrected mid-sentence (e.g., "not to investment- not to invest"). This is normal in speech — do NOT penalize self-corrections or repetitions. Evaluate the FINAL intended sentence.
 
-Keep the response concise (3-5 sentences). Use bullet points.`;
+Please evaluate in Korean (한국어로 답변):
+1. **문법**: 최종 의도한 문장이 문법적으로 올바른지 (오류가 있으면 구체적으로 지적)
+2. **단어 사용**: "${word}"의 사용이 적절하고 자연스러운지. 부적절하다면, 학생이 말하고자 한 비슷한 뉘앙스를 유지하면서 "${word}"를 올바르게 사용하는 예시를 제안
+3. **자연스러움**: 원어민이 들었을 때 자연스러운 문장인지
+4. **수정 제안**: 학생의 원래 의도와 뉘앙스를 최대한 유지하면서, "${word}"를 더 정확하게 사용하는 문장을 제안. 의미를 바꾸지 말 것.
+
+Keep the response concise. Use bullet points.`;
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${getKey('geminiKey')}`,
