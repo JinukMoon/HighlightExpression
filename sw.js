@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vocab-quiz-v1';
+const CACHE_NAME = 'vocab-quiz-v2';
 const BASE_PATH = '/HighlightExpression';
 
 const ASSETS_TO_CACHE = [
@@ -10,6 +10,8 @@ const ASSETS_TO_CACHE = [
   `${BASE_PATH}/data/examples.json`,
   `${BASE_PATH}/data/phonetics.json`,
   `${BASE_PATH}/data/prepositions.json`,
+  `${BASE_PATH}/practice.js`,
+  `${BASE_PATH}/practice.css`,
   `${BASE_PATH}/icons/icon-192.png`,
   `${BASE_PATH}/icons/icon-512.png`
 ];
