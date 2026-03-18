@@ -59,10 +59,10 @@
   background: linear-gradient(135deg, #1e293b, #0f172a);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
-  padding: 32px;
-  max-width: 520px;
-  width: 100%;
-  max-height: 80vh;
+  padding: 36px;
+  max-width: 720px;
+  width: 95%;
+  max-height: 90vh;
   overflow-y: auto;
   color: #fff;
 }

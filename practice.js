@@ -230,7 +230,7 @@ Please evaluate in Korean (한국어로 답변):
 Keep the response concise (3-5 sentences). Use bullet points.`;
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getKey('geminiKey')}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${getKey('geminiKey')}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
