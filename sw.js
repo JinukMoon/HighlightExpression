@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vocab-quiz-v2';
+const CACHE_NAME = 'vocab-quiz-v3';
 const BASE_PATH = '/HighlightExpression';
 
 const ASSETS_TO_CACHE = [
