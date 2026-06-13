@@ -428,15 +428,16 @@ Be specific and quote the learner's lines. Use bullet points.`;
     return geminiRequest({ contents: [{ parts: [{ text: prompt }] }] });
   }
 
-  function createSmallTalkBtn() {
-    if (document.getElementById('smalltalk-launch-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'smalltalk-launch-btn';
-    btn.className = 'smalltalk-launch-btn';
-    btn.textContent = '💬';
-    btn.title = 'Small Talk Practice';
-    btn.addEventListener('click', openSmallTalk);
-    document.body.appendChild(btn);
+  // Inject a "Small Talk" tab next to the voca / prepo tabs
+  function injectSmallTalkTab() {
+    const tabs = document.querySelector('.quiz-tabs');
+    if (!tabs) return;
+    if (tabs.querySelector('.st-tab')) return;
+    const tab = document.createElement('button');
+    tab.className = 'tab st-tab';
+    tab.textContent = '💬 Small Talk';
+    tab.addEventListener('click', openSmallTalk);
+    tabs.appendChild(tab);
   }
 
   function openSmallTalk() {
@@ -677,19 +678,20 @@ Be specific and quote the learner's lines. Use bullet points.`;
   function observe() {
     const observer = new MutationObserver(() => {
       injectPracticeButton();
+      injectSmallTalkTab();
     });
     observer.observe(document.getElementById('root'), {
       childList: true,
       subtree: true,
     });
     injectPracticeButton();
+    injectSmallTalkTab();
   }
 
   // ─── Init ───
 
   function init() {
     createSettingsBtn();
-    createSmallTalkBtn();
     if (document.getElementById('root')) {
       observe();
     } else {

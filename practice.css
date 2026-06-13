@@ -157,27 +157,6 @@
 }
 
 /* ─── Small Talk Mode ─── */
-.smalltalk-launch-btn {
-  position: fixed;
-  bottom: 24px;
-  right: 84px;
-  width: 48px;
-  height: 48px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(102, 126, 234, 0.25);
-  backdrop-filter: blur(10px);
-  font-size: 22px;
-  cursor: pointer;
-  z-index: 1000;
-  transition: all 0.3s;
-}
-
-.smalltalk-launch-btn:hover {
-  background: rgba(102, 126, 234, 0.45);
-  transform: scale(1.1);
-}
-
 .st-modal {
   display: flex;
   flex-direction: column;
@@ -326,14 +305,6 @@
   .practice-settings-btn {
     bottom: 16px;
     right: 16px;
-    width: 42px;
-    height: 42px;
-    font-size: 18px;
-  }
-
-  .smalltalk-launch-btn {
-    bottom: 16px;
-    right: 68px;
     width: 42px;
     height: 42px;
     font-size: 18px;
