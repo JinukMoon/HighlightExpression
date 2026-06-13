@@ -265,10 +265,13 @@
   cursor: pointer;
 }
 
-.st-mic-btn.recording {
-  background: rgba(239, 68, 68, 0.3) !important;
-  color: #ef4444 !important;
-  animation: pulse 1.2s ease-in-out infinite;
+.st-status {
+  animation: stStatusPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes stStatusPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 .st-transcript-wrap {

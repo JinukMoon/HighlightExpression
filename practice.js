@@ -10,7 +10,11 @@
   const STORAGE_KEYS = {
     elevenLabsKey: 'practice_elevenlabs_key',
     geminiKey: 'practice_gemini_key',
+    elevenVoiceId: 'practice_eleven_voice_id',
   };
+
+  // Default ElevenLabs voice (Jessica — warm, conversational). Override in settings.
+  const DEFAULT_VOICE_ID = 'cgSgspJ2msm6clMCkdW9';
 
   let mediaRecorder = null;
   let audioChunks = [];
@@ -53,6 +57,8 @@
         <input type="password" id="practice-el-key" placeholder="xi-..." value="${getKey('elevenLabsKey')}" />
         <label>Gemini API Key</label>
         <input type="password" id="practice-gemini-key" placeholder="AIza..." value="${getKey('geminiKey')}" />
+        <label>ElevenLabs Voice ID (선택 — 비우면 기본 음성)</label>
+        <input type="text" id="practice-voice-id" placeholder="${DEFAULT_VOICE_ID}" value="${getKey('elevenVoiceId')}" />
         <div class="practice-modal-buttons">
           <button id="practice-save-btn" class="btn primary">Save</button>
           <button id="practice-cancel-btn" class="btn secondary">Cancel</button>
@@ -66,6 +72,7 @@
     document.getElementById('practice-save-btn').addEventListener('click', () => {
       setKey('elevenLabsKey', document.getElementById('practice-el-key').value);
       setKey('geminiKey', document.getElementById('practice-gemini-key').value);
+      setKey('elevenVoiceId', document.getElementById('practice-voice-id').value);
       closeSettings();
     });
     document.getElementById('practice-cancel-btn').addEventListener('click', closeSettings);
@@ -351,7 +358,14 @@ Keep the response concise. Use bullet points. Quote example sentences in English
   let stSession = null;
   let stRecorder = null;
   let stChunks = [];
-  let stRecording = false;
+  let stListening = false;
+  let stPaused = false;
+  let stStream = null;
+  let stAudioCtx = null;
+  let stAnalyser = null;
+  let stVadRAF = null;
+  let stCurrentAudio = null;
+  let stDiscardNext = false;
 
   function pickScenario() {
     return ST_SCENARIOS[Math.floor(Math.random() * ST_SCENARIOS.length)];
@@ -375,15 +389,97 @@ Keep the response concise. Use bullet points. Quote example sentences in English
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
 
-  // Voice-only AI output (no caption) — listening practice
-  function speak(text) {
-    if (!('speechSynthesis' in window)) return;
-    const clean = text.replace(/\*\*(.*?)\*\*/g, '$1');
-    const u = new SpeechSynthesisUtterance(clean);
-    u.lang = 'en-US';
-    u.rate = 0.95;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+  // ── Voice-only AI output (no caption) — listening practice ──
+
+  // Realistic ElevenLabs TTS → returns object URL of mp3
+  async function elevenLabsTTS(text) {
+    const voiceId = getKey('elevenVoiceId') || DEFAULT_VOICE_ID;
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': getKey('elevenLabsKey'),
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: {
+          stability: 0.4,
+          similarity_boost: 0.75,
+          style: 0.35,
+          use_speaker_boost: true,
+        },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`TTS failed (${res.status}): ${t}`);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+
+  function playUrl(url) {
+    return new Promise((resolve) => {
+      const a = new Audio(url);
+      stCurrentAudio = a;
+      a.onended = () => resolve();
+      a.onerror = () => resolve();
+      a.onpause = () => resolve(); // explicit stopAudio() must not block the await
+      a.play().catch(() => resolve());
+    });
+  }
+
+  // Browser TTS fallback
+  function webSpeak(text) {
+    return new Promise((resolve) => {
+      if (!('speechSynthesis' in window)) {
+        resolve();
+        return;
+      }
+      const u = new SpeechSynthesisUtterance(text.replace(/\*\*(.*?)\*\*/g, '$1'));
+      u.lang = 'en-US';
+      u.rate = 0.97;
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    });
+  }
+
+  // Speak an AI turn; cache the audio URL on the item for replay. Resolves when playback ends.
+  async function speakAI(item) {
+    try {
+      const url = await elevenLabsTTS(item.text);
+      item.audioUrl = url;
+      await playUrl(url);
+    } catch (e) {
+      // ElevenLabs unavailable (quota / voice access) → browser voice
+      item.audioUrl = null;
+      await webSpeak(item.text);
+    }
+  }
+
+  function replayAI(item) {
+    stopAudio();
+    if (item.audioUrl) {
+      playUrl(item.audioUrl);
+    } else {
+      webSpeak(item.text);
+    }
+  }
+
+  function stopAudio() {
+    if (stCurrentAudio) {
+      try {
+        stCurrentAudio.pause();
+      } catch (e) {
+        /* noop */
+      }
+      stCurrentAudio = null;
+    }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
   }
 
   function buildContents(session) {
@@ -452,6 +548,7 @@ Be specific and quote the learner's lines. Use bullet points.`;
     localStorage.setItem(ST_KEYS.opensUser, (!userOpens).toString());
 
     stSession = { scenario: pickScenario(), history: [], userOpens, ended: false, busy: false };
+    stPaused = false;
 
     const overlay = document.createElement('div');
     overlay.id = 'smalltalk-modal';
@@ -462,29 +559,32 @@ Be specific and quote the learner's lines. Use bullet points.`;
         <div class="st-scenario">📍 ${stSession.scenario}<br>
           <span class="st-opener">${userOpens ? '🗣️ 당신이 먼저 말을 거세요 (opening 연습)' : '👂 AI가 먼저 말을 겁니다 — 들어보세요'}</span>
         </div>
-        <div class="st-hint">AI는 음성으로만 답합니다 (자막 없음). 🔊 버튼으로 다시 들을 수 있어요.</div>
+        <div class="st-hint">버튼 없이 자동으로 진행돼요. 말하고 잠깐 멈추면 인식하고, AI가 음성으로 답합니다 (자막 없음).</div>
         <div class="st-log" id="st-log"></div>
         <div class="st-controls">
-          <button class="btn primary st-mic-btn" id="st-mic-btn">🎤 말하기</button>
-          <button class="btn secondary st-end-btn" id="st-end-btn">End & 피드백</button>
+          <button class="btn secondary st-pause-btn" id="st-pause-btn">⏸ 일시정지</button>
+          <button class="btn primary st-end-btn" id="st-end-btn">End & 피드백</button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
 
-    document.getElementById('st-mic-btn').addEventListener('click', handleStMic);
+    document.getElementById('st-pause-btn').addEventListener('click', toggleStPause);
     document.getElementById('st-end-btn').addEventListener('click', endSmallTalk);
 
-    if (!userOpens) {
-      // AI opens the conversation
+    if (userOpens) {
+      // User opens → start listening right away
+      startListening();
+    } else {
+      // AI opens → speak, then auto-listen
       aiSmallTalkTurn();
     }
   }
 
   function closeSmallTalk() {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    if (stRecorder && stRecorder.state === 'recording') stRecorder.stop();
-    stRecording = false;
+    stopAudio();
+    stopListening(true);
+    stPaused = false;
     const modal = document.getElementById('smalltalk-modal');
     if (modal) modal.remove();
     stSession = null;
@@ -507,7 +607,7 @@ Be specific and quote the learner's lines. Use bullet points.`;
     log.querySelectorAll('.st-replay').forEach((b) => {
       b.addEventListener('click', () => {
         const idx = parseInt(b.dataset.idx, 10);
-        if (stSession.history[idx]) speak(stSession.history[idx].text);
+        if (stSession.history[idx]) replayAI(stSession.history[idx]);
       });
     });
     log.scrollTop = log.scrollHeight;
@@ -535,79 +635,161 @@ Be specific and quote the learner's lines. Use bullet points.`;
   async function aiSmallTalkTurn() {
     if (!stSession || stSession.busy) return;
     stSession.busy = true;
-    setStStatus('💬 ...');
+    setStStatus('💬 생각 중...');
     try {
       const reply = await getSmallTalkReply(stSession);
-      clearStStatus();
       if (!reply.trim()) {
         setStStatus('(AI 응답 없음)');
+        stSession.busy = false;
         return;
       }
-      stSession.history.push({ role: 'ai', text: reply.trim() });
+      const item = { role: 'ai', text: reply.trim(), audioUrl: null };
+      stSession.history.push(item);
       renderStLog();
-      speak(reply.trim());
-    } catch (err) {
+      setStStatus('🔊 듣는 중... (AI가 말하고 있어요)');
+      await speakAI(item);
       clearStStatus();
+      stSession.busy = false;
+      // Continue hands-free: listen for the user's reply
+      startListening();
+    } catch (err) {
       setStStatus(`오류: ${err.message}`);
-    } finally {
       stSession.busy = false;
     }
   }
 
-  async function handleStMic() {
-    if (!stSession || stSession.busy) return;
-    if (stRecording) {
-      stopStRecording();
-    } else {
-      await startStRecording();
-    }
-  }
+  // ── Hands-free listening with voice-activity (silence) detection ──
 
-  async function startStRecording() {
+  const VAD_SPEECH_THRESHOLD = 0.022; // RMS above this = speech
+  const VAD_SILENCE_MS = 1300; // stop after this much silence following speech
+  const VAD_MIN_SPEECH_MS = 250; // ignore blips shorter than this
+
+  async function startListening() {
+    if (!stSession || stSession.ended || stPaused || stListening) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stChunks = [];
-      stRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      stRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) stChunks.push(e.data);
-      };
-      stRecorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(stChunks, { type: 'audio/webm' });
-        processStUserAudio(blob);
-      };
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-      stRecorder.start();
-      stRecording = true;
-      updateStMic(true);
+      stStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      setStStatus('마이크 접근 권한이 필요합니다.');
+      setStStatus('🎤 마이크 권한이 필요합니다. 설정을 확인해 주세요.');
+      return;
+    }
+    stChunks = [];
+    stDiscardNext = false;
+    stRecorder = new MediaRecorder(stStream, { mimeType: 'audio/webm' });
+    stRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) stChunks.push(e.data);
+    };
+    stRecorder.onstop = () => {
+      const blob = new Blob(stChunks, { type: 'audio/webm' });
+      const discard = stDiscardNext;
+      stDiscardNext = false;
+      cleanupListening();
+      if (!discard) processStUserAudio(blob);
+    };
+    stRecorder.start();
+    stListening = true;
+    setStStatus('🎙️ 듣는 중... 편하게 말해보세요');
+    runVAD(stStream);
+  }
+
+  function runVAD(stream) {
+    stAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (stAudioCtx.state === 'suspended') stAudioCtx.resume();
+    const source = stAudioCtx.createMediaStreamSource(stream);
+    stAnalyser = stAudioCtx.createAnalyser();
+    stAnalyser.fftSize = 512;
+    source.connect(stAnalyser);
+    const data = new Uint8Array(stAnalyser.fftSize);
+
+    let speechStartedAt = null;
+    let silenceStartedAt = null;
+
+    function loop() {
+      if (!stListening || !stAnalyser) return;
+      stAnalyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const now = performance.now();
+
+      if (rms > VAD_SPEECH_THRESHOLD) {
+        if (speechStartedAt === null) speechStartedAt = now;
+        silenceStartedAt = null;
+      } else if (speechStartedAt !== null && now - speechStartedAt > VAD_MIN_SPEECH_MS) {
+        if (silenceStartedAt === null) silenceStartedAt = now;
+        else if (now - silenceStartedAt > VAD_SILENCE_MS) {
+          stopListening();
+          return;
+        }
+      }
+      stVadRAF = requestAnimationFrame(loop);
+    }
+    loop();
+  }
+
+  function stopListening(discard) {
+    stDiscardNext = !!discard;
+    stListening = false;
+    if (stVadRAF) {
+      cancelAnimationFrame(stVadRAF);
+      stVadRAF = null;
+    }
+    if (stRecorder && stRecorder.state === 'recording') {
+      stRecorder.stop(); // → onstop → cleanupListening + (process unless discard)
+    } else {
+      cleanupListening();
     }
   }
 
-  function stopStRecording() {
-    if (stRecorder && stRecorder.state === 'recording') stRecorder.stop();
-    stRecording = false;
-    updateStMic(false);
+  function cleanupListening() {
+    stListening = false;
+    if (stVadRAF) {
+      cancelAnimationFrame(stVadRAF);
+      stVadRAF = null;
+    }
+    if (stStream) {
+      stStream.getTracks().forEach((t) => t.stop());
+      stStream = null;
+    }
+    if (stAudioCtx) {
+      try {
+        stAudioCtx.close();
+      } catch (e) {
+        /* noop */
+      }
+      stAudioCtx = null;
+    }
+    stAnalyser = null;
   }
 
-  function updateStMic(recording) {
-    const btn = document.getElementById('st-mic-btn');
-    if (!btn) return;
-    btn.textContent = recording ? '⏹ 멈추기' : '🎤 말하기';
-    btn.classList.toggle('recording', recording);
+  function toggleStPause() {
+    const btn = document.getElementById('st-pause-btn');
+    if (!stPaused) {
+      stPaused = true;
+      stopAudio();
+      stopListening(true);
+      if (btn) btn.textContent = '▶ 재개';
+      setStStatus('⏸ 일시정지됨');
+    } else {
+      stPaused = false;
+      if (btn) btn.textContent = '⏸ 일시정지';
+      clearStStatus();
+      if (!stSession.busy) startListening();
+    }
   }
 
   async function processStUserAudio(blob) {
-    if (!stSession) return;
+    if (!stSession || stSession.ended) return;
     stSession.busy = true;
-    setStStatus('🔄 음성 인식 중...');
+    setStStatus('🔄 인식 중...');
     try {
       const text = await transcribeAudio(blob);
-      clearStStatus();
       if (!text.trim()) {
-        setStStatus('음성이 인식되지 않았습니다. 다시 시도해 주세요.');
+        // Nothing recognized (silence/noise) — keep listening hands-free
         stSession.busy = false;
+        if (!stPaused) startListening();
         return;
       }
       stSession.history.push({ role: 'user', text: text.trim() });
@@ -615,7 +797,6 @@ Be specific and quote the learner's lines. Use bullet points.`;
       stSession.busy = false;
       await aiSmallTalkTurn();
     } catch (err) {
-      clearStStatus();
       setStStatus(`오류: ${err.message}`);
       stSession.busy = false;
     }
@@ -626,8 +807,9 @@ Be specific and quote the learner's lines. Use bullet points.`;
       closeSmallTalk();
       return;
     }
-    if (stRecording) stopStRecording();
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    stSession.ended = true;
+    stopAudio();
+    stopListening(true);
 
     const userTurns = stSession.history.filter((h) => h.role === 'user').length;
     if (userTurns === 0) {
